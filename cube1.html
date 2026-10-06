@@ -61,6 +61,8 @@
   .r label{flex:0 0 74px;color:#80857F;font-size:10px;letter-spacing:.04em}
   .r input[type=range]{flex:1 1 auto;min-width:0;accent-color:#fff;height:14px}
   .r .v{flex:0 0 44px;text-align:right;font-size:10px;color:#C9CCC8}
+  .r input[type=color]{flex:1 1 auto;min-width:0;height:22px;padding:0;border:1px solid #2C302F;
+                       background:#1C1F1E;cursor:pointer}
   .r select{flex:1 1 auto;min-width:0;background:#1C1F1E;color:#fff;border:1px solid #2C302F;
             font:inherit;font-size:10px;padding:3px 5px}
   .empty{color:#6C716C;font-size:11px;line-height:1.7;padding:6px 0}
@@ -81,7 +83,8 @@
   <div class="tabs" id="tabs"></div>
 </div>
 <aside id="set"></aside>
-<input id="pick" type="file" accept="image/*,video/*" multiple style="display:none">
+<input id="pick" type="file" multiple style="display:none"
+       accept="image/*,video/*,.mov,.mp4,.m4v,.webm,.mkv,.avi,.qt">
 
 <script>
 (() => {
@@ -184,6 +187,13 @@
     octx.fillStyle = "#000"; octx.fillRect(0, 0, OW, OH);
     live().forEach(L => {
       if (!L.ready || !L.visible) return;
+      if (L.kind === "color"){                      // a flat fill over the whole frame
+        octx.globalAlpha = L.opacity;
+        octx.globalCompositeOperation = L.blend;
+        octx.fillStyle = L.color;
+        octx.fillRect(0, 0, OW, OH);
+        return;
+      }
       const n = L.node;
       if (L.kind === "video" && n.readyState < 2) return;
       const vw = L.kind === "video" ? n.videoWidth : n.naturalWidth;
@@ -230,10 +240,18 @@
   }, 400);
 
   /* ---------- layers ---------- */
+  function addColor(){
+    live().push({ kind:"color", color:"#101010", node:null, url:null, name:"Color",
+                  ready:true, visible:true, opacity:1, blend:"source-over" });
+    sel = live().length - 1;
+    build(); drawer();
+  }
   function addFiles(files){
     [...files].forEach(f => {
       const url = URL.createObjectURL(f);
-      const L = { kind: f.type.startsWith("video") ? "video" : "image", node:null, url,
+      // some .mov files come through with an empty type, so fall back to the name
+      const vid = f.type.startsWith("video") || /\.(mov|mp4|m4v|webm|mkv|avi|qt)$/i.test(f.name);
+      const L = { kind: vid ? "video" : "image", node:null, url,
                   name: f.name, ready:false, visible:true, opacity:1, blend:"source-over",
                   fit:"cover", scale:1, dx:0, dy:0, rate:1, start:0 };
       live().push(L);
@@ -243,6 +261,7 @@
         v.setAttribute("playsinline", ""); v.style.display = "none";
         document.body.appendChild(v);
         v.addEventListener("loadeddata", () => { L.node = v; L.ready = true; build(); drawer(); v.play().catch(() => {}); });
+        v.addEventListener("error", () => { L.bad = true; drawer(); });
       } else {
         const im = new Image();
         im.onload = () => { L.node = im; L.ready = true; build(); drawer(); };
@@ -313,7 +332,8 @@
       const eye = document.createElement("button");
       eye.className = "ic" + (L.visible ? "" : " off"); eye.textContent = L.visible ? "●" : "○";
       eye.addEventListener("click", () => { L.visible = !L.visible; build(); drawer(); });
-      const nm = el("nm"); nm.textContent = L.name;
+      const nm = el("nm"); nm.textContent = L.bad ? L.name + "  — codec not supported" : L.name;
+      if (L.bad) nm.style.color = "#E4443B";
       nm.addEventListener("click", () => { sel = (sel === i ? -1 : i); drawer(); });
       const up = document.createElement("button"); up.className = "ic"; up.textContent = "↑";
       up.addEventListener("click", () => move(i, 1));
@@ -324,25 +344,40 @@
       [eye, nm, up, dn, rm].forEach(n => hd.appendChild(n));
       box.appendChild(hd);
       if (i === sel){
+        if (L.kind === "color"){
+          const r = el("r");
+          const lb = document.createElement("label"); lb.textContent = "color"; r.appendChild(lb);
+          const ci = document.createElement("input");
+          ci.type = "color"; ci.value = L.color;
+          ci.addEventListener("input", () => { L.color = ci.value; paint(true); });
+          r.appendChild(ci); box.appendChild(r);
+        }
         slider(box, L, "opacity", "opacity", 0, 1, .02, v => Math.round(v * 100) + "%");
         picker(box, L, "blend", "blend", BLENDS, ["normal", "screen", "multiply", "overlay", "add", "difference"]);
-        picker(box, L, "fit", "fit", ["cover", "contain", "stretch"]);
-        slider(box, L, "scale", "scale", .2, 3, .01, v => v.toFixed(2) + "×");
-        slider(box, L, "dx", "shift x", -1000, 1000, 5, v => v + "px");
-        slider(box, L, "dy", "shift y", -720, 720, 5, v => v + "px");
-        if (L.kind === "video"){
-          slider(box, L, "rate", "speed", .1, 3, .05, v => v.toFixed(2) + "×");
-          const D = (L.node && L.node.duration) || 30;
-          slider(box, L, "start", "start at", 0, +D.toFixed(2), .05, v => v.toFixed(2) + "s");
+        if (L.kind !== "color"){
+          picker(box, L, "fit", "fit", ["cover", "contain", "stretch"]);
+          slider(box, L, "scale", "scale", .2, 3, .01, v => v.toFixed(2) + "×");
+          slider(box, L, "dx", "shift x", -1000, 1000, 5, v => v + "px");
+          slider(box, L, "dy", "shift y", -720, 720, 5, v => v + "px");
+          if (L.kind === "video"){
+            slider(box, L, "rate", "speed", .1, 3, .05, v => v.toFixed(2) + "×");
+            const D = (L.node && L.node.duration) || 30;
+            slider(box, L, "start", "start at", 0, +D.toFixed(2), .05, v => v.toFixed(2) + "s");
+          }
         }
       }
       setPanel.appendChild(box);
     });
     const add = document.createElement("button");
     add.className = "btn"; add.style.cssText = "width:100%;margin-top:8px";
-    add.textContent = "+ ADD LAYER";
+    add.textContent = "+ IMAGE / VIDEO";
     add.addEventListener("click", () => $("pick").click());
     setPanel.appendChild(add);
+    const col = document.createElement("button");
+    col.className = "btn"; col.style.cssText = "width:100%;margin-top:6px";
+    col.textContent = "+ COLOR";
+    col.addEventListener("click", addColor);
+    setPanel.appendChild(col);
     const sync = document.createElement("button");
     sync.className = "btn ghost"; sync.style.cssText = "width:100%;margin-top:6px";
     sync.textContent = "SYNC CLIPS";
