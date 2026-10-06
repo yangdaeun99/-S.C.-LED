@@ -1,0 +1,5 @@
+# publish the cube simulator only — everything else in this folder is client work
+*
+!.gitignore
+!README.md
+!cube1.html

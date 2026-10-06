@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LED Cube 1 Rig</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{background:#0C0D0D;color:#fff;overflow:hidden;
+       font-family:"Noto Sans","Noto Sans JP","Noto Sans CJK JP",system-ui,sans-serif;font-size:12px}
+  .room{position:fixed;inset:0;display:grid;place-items:center;cursor:grab;touch-action:none}
+  .room:active{cursor:grabbing}
+  .room.over{outline:1px dashed rgba(255,255,255,.45);outline-offset:-12px}
+  .scene{position:relative}
+  .cube{position:relative;transform-style:preserve-3d;will-change:transform}
+  .cf{position:absolute;left:0;top:0;background:#000;backface-visibility:hidden}
+  .pnl{position:absolute;overflow:hidden;background:#000}
+  .pnl canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  /* the plate sits inside every panel it crosses, so the slit cuts it the way
+     it cuts a picture — but it is held clear of the vertical slit to stay legible */
+  .plate{position:absolute;color:rgba(0,0,0,.85);line-height:1}
+  .plate span{position:absolute;left:0;right:0;text-align:center;white-space:nowrap;display:block}
+  .plate .k{font-weight:700}
+  .plate .px{font-weight:600}
+  .plate .fr{color:#C4161C;font-weight:600}
+
+  .bar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);
+       display:flex;gap:6px;align-items:center;z-index:5}
+  .btn{padding:9px 16px;border:0;border-radius:2px;background:#fff;color:#111;
+       font-family:inherit;font-size:11px;font-weight:600;letter-spacing:.07em;cursor:pointer}
+  .btn:hover{background:#E6E6E6}
+  .btn.ghost{background:rgba(255,255,255,.12);color:#fff}
+  .btn.ghost:hover{background:rgba(255,255,255,.22)}
+  .btn.ghost.on{background:#fff;color:#111}
+  .tabs{display:flex;gap:4px;margin-left:6px}
+  .title{position:fixed;left:22px;top:20px;z-index:5;font-size:12px;font-weight:600;
+         letter-spacing:.1em;color:#fff;pointer-events:none}
+  .tab{width:30px;height:30px;border:0;border-radius:2px;background:rgba(255,255,255,.12);
+       color:#fff;font:600 11px/1 inherit;cursor:pointer}
+  .tab.on{background:#fff;color:#111}
+  .tab:hover{background:rgba(255,255,255,.26)}
+  .tab.on:hover{background:#fff}
+
+  #set{position:fixed;right:0;top:0;width:306px;height:100%;background:#131514;
+       border-left:1px solid #262928;padding:18px 16px 40px;overflow-y:auto;
+       transform:translateX(100%);transition:transform .22s ease;z-index:6}
+  #set.on{transform:none}
+  #set h4{font-size:10px;letter-spacing:.18em;color:#80857F;font-weight:600;margin:16px 0 8px}
+  #set h4:first-child{margin-top:0}
+  .lay{border:1px solid #262928;padding:9px;margin-bottom:7px}
+  .lay.sel{border-color:#fff}
+  .lhead{display:flex;gap:6px;align-items:center;margin-bottom:7px}
+  .lhead .nm{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+             font-size:11px;cursor:pointer}
+  .ic{width:22px;height:22px;border:0;border-radius:2px;background:rgba(255,255,255,.1);
+      color:#fff;font:600 11px/1 inherit;cursor:pointer}
+  .ic:hover{background:rgba(255,255,255,.24)}
+  .ic.off{opacity:.35}
+  .r{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+  .r label{flex:0 0 74px;color:#80857F;font-size:10px;letter-spacing:.04em}
+  .r input[type=range]{flex:1 1 auto;min-width:0;accent-color:#fff;height:14px}
+  .r .v{flex:0 0 44px;text-align:right;font-size:10px;color:#C9CCC8}
+  .r select{flex:1 1 auto;min-width:0;background:#1C1F1E;color:#fff;border:1px solid #2C302F;
+            font:inherit;font-size:10px;padding:3px 5px}
+  .empty{color:#6C716C;font-size:11px;line-height:1.7;padding:6px 0}
+</style>
+</head>
+<body>
+
+<div class="title">Cube1 Simulation</div>
+
+<div class="room" id="room">
+  <div class="scene" id="scene"><div class="cube" id="cube"></div></div>
+</div>
+
+<div class="bar">
+  <button class="btn" id="add" type="button">IMAGE / VIDEO</button>
+  <button class="btn ghost" id="gear" type="button">SETTINGS</button>
+  <button class="btn ghost" id="reset" type="button">RESET</button>
+  <div class="tabs" id="tabs"></div>
+</div>
+<aside id="set"></aside>
+<input id="pick" type="file" accept="image/*,video/*" multiple style="display:none">
+
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const room = $("room"), scene = $("scene"), cube = $("cube"), setPanel = $("set");
+  const el = (c, s) => { const d = document.createElement("div"); if (c) d.className = c; if (s) d.style.cssText = s; return d; };
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  /* 1 px of the 2000x1440 delivery file = 8 mm. A display is 2880 mm square,
+     four make a face, a 260 mm cross sits between them and carries no pixels. */
+  const PANEL = 2880, SLIT = 260, FACE = PANEL * 2 + SLIT, LW = 1600, C1 = PANEL + SLIT;
+  const SRC_W = 2000, SRC_H = 1440;
+  const OW = 1000, OH = 720;                     // the composite buffer, half scale
+
+  const PIECES = {
+    A:  { f:"left",   x:FACE-LW, y:0,  w:LW,    h:FACE,  c:"#E4443B", k:"A", px:"200 × 720", tx:FACE-LW/2 },
+    B:  { f:"front",  x:0,       y:0,  w:FACE,  h:FACE,  c:"#F0A830", k:"B", px:"720 × 720", tx:FACE/2, front:true },
+    C:  { f:"right",  x:0,       y:0,  w:FACE,  h:FACE,  c:"#7B68E8", k:"C", px:"720 × 720", tx:FACE/2 },
+    D:  { f:"back",   x:0,       y:0,  w:PANEL, h:FACE,  c:"#4FD8E8", k:"D", px:"360 × 720", tx:PANEL/2 },
+    E1: { f:"bottom", x:0,       y:0,  w:PANEL, h:PANEL, c:"#C96BE0", k:"E", px:"360 × 360", tx:PANEL/2 },
+    E2: { f:"bottom", x:C1,      y:0,  w:PANEL, h:FACE,  c:"#E8D83B", k:"E", px:"360 × 720", tx:C1+PANEL/2 }
+  };
+  const PANELS = [
+    { p:"B",  x:0,       y:0,  w:PANEL, h:PANEL, s:[ 200,   0, 360, 360] },
+    { p:"B",  x:C1,      y:0,  w:PANEL, h:PANEL, s:[ 560,   0, 360, 360] },
+    { p:"B",  x:0,       y:C1, w:PANEL, h:PANEL, s:[ 200, 360, 360, 360] },
+    { p:"B",  x:C1,      y:C1, w:PANEL, h:PANEL, s:[ 560, 360, 360, 360] },
+    { p:"C",  x:0,       y:0,  w:PANEL, h:PANEL, s:[ 920,   0, 360, 360] },
+    { p:"C",  x:C1,      y:0,  w:PANEL, h:PANEL, s:[1280,   0, 360, 360] },
+    { p:"C",  x:0,       y:C1, w:PANEL, h:PANEL, s:[ 920, 360, 360, 360] },
+    { p:"C",  x:C1,      y:C1, w:PANEL, h:PANEL, s:[1280, 360, 360, 360] },
+    { p:"D",  x:0,       y:0,  w:PANEL, h:PANEL, s:[1640,   0, 360, 360] },
+    { p:"D",  x:0,       y:C1, w:PANEL, h:PANEL, s:[1640, 360, 360, 360] },
+    { p:"A",  x:FACE-LW, y:0,  w:LW,    h:PANEL, s:[   0,   0, 200, 360] },
+    { p:"A",  x:FACE-LW, y:C1, w:LW,    h:PANEL, s:[   0, 360, 200, 360] },
+    { p:"E1", x:0,       y:0,  w:PANEL, h:PANEL, s:[ 200, 720, 360, 360] },
+    { p:"E2", x:C1,      y:0,  w:PANEL, h:PANEL, s:[ 560, 720, 360, 360] },
+    { p:"E2", x:C1,      y:C1, w:PANEL, h:PANEL, s:[ 560,1080, 360, 360] }
+  ];
+  const SPIN = { front:"", right:"rotateY(90deg)", back:"rotateY(180deg)",
+                 left:"rotateY(-90deg)", bottom:"rotateX(-90deg)", top:"rotateX(90deg)" };
+
+  const P = { size:620, tilt:14, spin:-36 };
+  const BLENDS = ["source-over", "screen", "multiply", "overlay", "lighter", "difference"];
+  const CANVASES = [{ layers: [] }];
+  let cur = 0, sel = -1, slots = [], t0 = performance.now();
+
+  const off = document.createElement("canvas");
+  off.width = OW; off.height = OH;
+  const octx = off.getContext("2d");
+  const live = () => CANVASES[cur].layers;
+  const hasArt = () => live().some(L => L.ready && L.visible);
+
+  /* ---------- the rig ---------- */
+  function build(){
+    cube.innerHTML = ""; slots = [];
+    const S = P.size, k = S / FACE, spec = !hasArt();
+    const kf = Math.round(S * .155), pf = Math.round(S * .072), gap = S * .105;
+    scene.style.perspective = "1900px";
+    cube.style.width = cube.style.height = S + "px";
+
+    Object.keys(SPIN).forEach(key => {
+      const face = el("cf", `width:${S}px;height:${S}px;transform:${SPIN[key]} translateZ(${S / 2}px);`);
+      PANELS.filter(p => PIECES[p.p].f === key).forEach(p => {
+        const q = PIECES[p.p];
+        const box = el("pnl", `left:${p.x * k}px;top:${p.y * k}px;` +
+                              `width:${p.w * k}px;height:${p.h * k}px;` +
+                              (spec ? `background:${q.c};` : ""));
+        if (spec){
+          const W = Math.min(q.w, PANEL) * k;             // never wider than one display
+          const cx = (q.tx - p.x) * k, cy = (q.y + q.h / 2 - p.y) * k;
+          const fit = Math.min(pf, Math.floor((W - 12) / (q.px.length * .58)));
+          const pl = el("plate", `left:${cx - W / 2}px;top:${cy}px;width:${W}px;height:0;`);
+          pl.innerHTML =
+            `<span class="k" style="font-size:${kf}px;bottom:${gap / 2}px">${q.k}</span>` +
+            `<span class="px" style="font-size:${fit}px;top:${gap / 2}px">${q.px}</span>` +
+            (q.front ? `<span class="fr" style="font-size:${Math.round(fit * .92)}px;` +
+                       `top:${gap / 2 + fit * 1.6}px">Front</span>` : "");
+          box.appendChild(pl);
+        } else {
+          const cv = document.createElement("canvas");
+          cv.width  = clamp(Math.round(p.w * k * 1.5), 120, 480);
+          cv.height = clamp(Math.round(p.h * k * 1.5), 120, 480);
+          box.appendChild(cv);
+          slots.push({ cv, ctx: cv.getContext("2d"), s: p.s });
+        }
+        face.appendChild(box);
+      });
+      cube.appendChild(face);
+    });
+    view(); paint(true);
+  }
+  const view = () => cube.style.transform =
+    `translateZ(${-P.size / 2}px) rotateX(${P.tilt}deg) rotateY(${P.spin}deg)`;
+
+  /* ---------- compositing: every layer into one frame, then onto the panels ---------- */
+  function composite(){
+    octx.globalAlpha = 1; octx.globalCompositeOperation = "source-over";
+    octx.fillStyle = "#000"; octx.fillRect(0, 0, OW, OH);
+    live().forEach(L => {
+      if (!L.ready || !L.visible) return;
+      const n = L.node;
+      if (L.kind === "video" && n.readyState < 2) return;
+      const vw = L.kind === "video" ? n.videoWidth : n.naturalWidth;
+      const vh = L.kind === "video" ? n.videoHeight : n.naturalHeight;
+      if (!vw || !vh) return;
+      let dw, dh;
+      if (L.fit === "stretch"){ dw = OW * L.scale; dh = OH * L.scale; }
+      else {
+        const sc = (L.fit === "cover" ? Math.max(OW / vw, OH / vh) : Math.min(OW / vw, OH / vh)) * L.scale;
+        dw = vw * sc; dh = vh * sc;
+      }
+      octx.globalAlpha = L.opacity;
+      octx.globalCompositeOperation = L.blend;
+      octx.drawImage(n, (OW - dw) / 2 + L.dx * OW / SRC_W, (OH - dh) / 2 + L.dy * OH / SRC_H, dw, dh);
+    });
+    octx.globalAlpha = 1; octx.globalCompositeOperation = "source-over";
+  }
+  function paint(force){
+    if (!hasArt()) return;
+    const moving = live().some(L => L.ready && L.visible && L.kind === "video");
+    if (!moving && !force) return;
+    composite();
+    const ax = OW / SRC_W, ay = OH / SRC_H;
+    slots.forEach(o => {
+      const [sx, sy, sw, sh] = o.s;
+      o.ctx.drawImage(off, sx * ax, sy * ay, sw * ax, sh * ay, 0, 0, o.cv.width, o.cv.height);
+    });
+  }
+  (function tick(){ paint(false); requestAnimationFrame(tick); })();
+
+  /* every clip runs off one clock, so layers and canvases stay in step */
+  setInterval(() => {
+    const now = performance.now();
+    CANVASES.forEach(C => C.layers.forEach(L => {
+      if (L.kind !== "video" || !L.ready) return;
+      const D = L.node.duration;
+      if (!D || !isFinite(D)) return;
+      const target = ((((now - t0) / 1000 * L.rate + L.start) % D) + D) % D;
+      let err = target - L.node.currentTime;
+      if (err > D / 2) err -= D; else if (err < -D / 2) err += D;
+      if (Math.abs(err) > .35){ L.node.currentTime = target; L.node.playbackRate = L.rate; }
+      else L.node.playbackRate = clamp(L.rate * (1 + err * .6), .1, 4);
+    }));
+  }, 400);
+
+  /* ---------- layers ---------- */
+  function addFiles(files){
+    [...files].forEach(f => {
+      const url = URL.createObjectURL(f);
+      const L = { kind: f.type.startsWith("video") ? "video" : "image", node:null, url,
+                  name: f.name, ready:false, visible:true, opacity:1, blend:"source-over",
+                  fit:"cover", scale:1, dx:0, dy:0, rate:1, start:0 };
+      live().push(L);
+      if (L.kind === "video"){
+        const v = document.createElement("video");
+        Object.assign(v, { src:url, muted:true, loop:true, autoplay:true, playsInline:true });
+        v.setAttribute("playsinline", ""); v.style.display = "none";
+        document.body.appendChild(v);
+        v.addEventListener("loadeddata", () => { L.node = v; L.ready = true; build(); drawer(); v.play().catch(() => {}); });
+      } else {
+        const im = new Image();
+        im.onload = () => { L.node = im; L.ready = true; build(); drawer(); };
+        im.src = url;
+      }
+    });
+    drawer();
+  }
+  function dropLayer(i){
+    const L = live()[i];
+    if (L.kind === "video" && L.node){ L.node.pause(); L.node.remove(); }
+    if (L.url) URL.revokeObjectURL(L.url);
+    live().splice(i, 1);
+    if (sel >= live().length) sel = live().length - 1;
+    build(); drawer();
+  }
+  function move(i, d){
+    const a = live(), j = i + d;
+    if (j < 0 || j >= a.length) return;
+    a.splice(j, 0, a.splice(i, 1)[0]);
+    sel = j; build(); drawer();
+  }
+
+  /* ---------- panel ---------- */
+  function slider(host, L, key, label, min, max, step, fmt){
+    const r = el("r");
+    const l = document.createElement("label"); l.textContent = label; r.appendChild(l);
+    const i = document.createElement("input");
+    i.type = "range"; i.min = min; i.max = max; i.step = step; i.value = L[key];
+    const v = el("v"); v.textContent = fmt ? fmt(L[key]) : L[key];
+    i.addEventListener("input", () => {
+      L[key] = parseFloat(i.value);
+      v.textContent = fmt ? fmt(L[key]) : L[key];
+      if (key === "rate") { /* picked up by the clock */ }
+      if (key === "start" && L.kind === "video" && L.node){
+        const D = L.node.duration || 1;
+        L.node.currentTime = ((((performance.now() - t0) / 1000 * L.rate + L.start) % D) + D) % D;
+      }
+      paint(true);
+    });
+    r.appendChild(i); r.appendChild(v); host.appendChild(r);
+  }
+  function picker(host, L, key, label, opts, labels){
+    const r = el("r");
+    const l = document.createElement("label"); l.textContent = label; r.appendChild(l);
+    const s = document.createElement("select");
+    opts.forEach((o, n) => { const e2 = document.createElement("option");
+      e2.value = o; e2.textContent = labels ? labels[n] : o; s.appendChild(e2); });
+    s.value = L[key];
+    s.addEventListener("change", () => { L[key] = s.value; paint(true); });
+    r.appendChild(s); host.appendChild(r);
+  }
+  function drawer(){
+    tabs();
+    setPanel.innerHTML = "";
+    const h = document.createElement("h4"); h.textContent = "LAYERS  ·  CANVAS " + (cur + 1);
+    setPanel.appendChild(h);
+    if (!live().length){
+      const e2 = el("empty");
+      e2.textContent = "No layers yet. Add an image or a video — stack more on top, reorder them, and the cube shows the result.";
+      setPanel.appendChild(e2);
+    }
+    // topmost layer first, the way it reads on screen
+    live().slice().reverse().forEach((L, ri) => {
+      const i = live().length - 1 - ri;
+      const box = el("lay" + (i === sel ? " sel" : ""));
+      const hd = el("lhead");
+      const eye = document.createElement("button");
+      eye.className = "ic" + (L.visible ? "" : " off"); eye.textContent = L.visible ? "●" : "○";
+      eye.addEventListener("click", () => { L.visible = !L.visible; build(); drawer(); });
+      const nm = el("nm"); nm.textContent = L.name;
+      nm.addEventListener("click", () => { sel = (sel === i ? -1 : i); drawer(); });
+      const up = document.createElement("button"); up.className = "ic"; up.textContent = "↑";
+      up.addEventListener("click", () => move(i, 1));
+      const dn = document.createElement("button"); dn.className = "ic"; dn.textContent = "↓";
+      dn.addEventListener("click", () => move(i, -1));
+      const rm = document.createElement("button"); rm.className = "ic"; rm.textContent = "×";
+      rm.addEventListener("click", () => dropLayer(i));
+      [eye, nm, up, dn, rm].forEach(n => hd.appendChild(n));
+      box.appendChild(hd);
+      if (i === sel){
+        slider(box, L, "opacity", "opacity", 0, 1, .02, v => Math.round(v * 100) + "%");
+        picker(box, L, "blend", "blend", BLENDS, ["normal", "screen", "multiply", "overlay", "add", "difference"]);
+        picker(box, L, "fit", "fit", ["cover", "contain", "stretch"]);
+        slider(box, L, "scale", "scale", .2, 3, .01, v => v.toFixed(2) + "×");
+        slider(box, L, "dx", "shift x", -1000, 1000, 5, v => v + "px");
+        slider(box, L, "dy", "shift y", -720, 720, 5, v => v + "px");
+        if (L.kind === "video"){
+          slider(box, L, "rate", "speed", .1, 3, .05, v => v.toFixed(2) + "×");
+          const D = (L.node && L.node.duration) || 30;
+          slider(box, L, "start", "start at", 0, +D.toFixed(2), .05, v => v.toFixed(2) + "s");
+        }
+      }
+      setPanel.appendChild(box);
+    });
+    const add = document.createElement("button");
+    add.className = "btn"; add.style.cssText = "width:100%;margin-top:8px";
+    add.textContent = "+ ADD LAYER";
+    add.addEventListener("click", () => $("pick").click());
+    setPanel.appendChild(add);
+    const sync = document.createElement("button");
+    sync.className = "btn ghost"; sync.style.cssText = "width:100%;margin-top:6px";
+    sync.textContent = "SYNC CLIPS";
+    sync.addEventListener("click", () => {
+      t0 = performance.now();
+      CANVASES.forEach(C => C.layers.forEach(L => {
+        if (L.kind === "video" && L.ready){
+          const D = L.node.duration || 1;
+          L.node.currentTime = ((L.start % D) + D) % D;
+          L.node.play().catch(() => {});
+        }
+      }));
+    });
+    setPanel.appendChild(sync);
+  }
+  function tabs(){
+    const t = $("tabs"); t.innerHTML = "";
+    CANVASES.forEach((c, i) => {
+      const b = document.createElement("button");
+      b.className = "tab" + (i === cur ? " on" : ""); b.textContent = i + 1;
+      b.addEventListener("click", () => { cur = i; sel = -1; build(); drawer(); });
+      t.appendChild(b);
+    });
+    const plus = document.createElement("button");
+    plus.className = "tab"; plus.textContent = "+";
+    plus.addEventListener("click", () => {
+      CANVASES.push({ layers: [] }); cur = CANVASES.length - 1; sel = -1;
+      setPanel.classList.add("on"); $("gear").classList.add("on");
+      build(); drawer();
+    });
+    t.appendChild(plus);
+  }
+
+  /* ---------- mouse ---------- */
+  let drag = null;
+  room.addEventListener("pointerdown", e => {
+    drag = { x:e.clientX, y:e.clientY, spin:P.spin, tilt:P.tilt };
+    room.setPointerCapture(e.pointerId);
+  });
+  room.addEventListener("pointermove", e => {
+    if (!drag) return;
+    P.spin = drag.spin + (e.clientX - drag.x) * .35;
+    P.tilt = clamp(drag.tilt - (e.clientY - drag.y) * .3, -85, 85);
+    view();
+  });
+  room.addEventListener("pointerup", () => { drag = null; });
+  room.addEventListener("wheel", e => {
+    e.preventDefault();
+    P.size = clamp(P.size - e.deltaY * .6, 220, 1200);
+    build();
+  }, { passive:false });
+
+  $("add").addEventListener("click", () => $("pick").click());
+  $("pick").addEventListener("change", e => { addFiles(e.target.files); e.target.value = ""; });
+  $("gear").addEventListener("click", () => {
+    const on = setPanel.classList.toggle("on");
+    $("gear").classList.toggle("on", on);
+    if (on) drawer();
+  });
+  // clears the layers of the canvas you are on — other canvases and the view stay put
+  $("reset").addEventListener("click", () => {
+    live().forEach(L => {
+      if (L.kind === "video" && L.node){ L.node.pause(); L.node.remove(); }
+      if (L.url) URL.revokeObjectURL(L.url);
+    });
+    CANVASES[cur].layers = []; sel = -1;
+    build(); drawer();
+  });
+  ["dragenter", "dragover"].forEach(t =>
+    room.addEventListener(t, e => { e.preventDefault(); room.classList.add("over"); }));
+  room.addEventListener("dragleave", () => room.classList.remove("over"));
+  room.addEventListener("drop", e => {
+    e.preventDefault(); room.classList.remove("over"); addFiles(e.dataTransfer.files);
+  });
+  document.addEventListener("dragover", e => e.preventDefault());
+  document.addEventListener("drop", e => e.preventDefault());
+
+  build(); tabs();
+})();
+</script>
+</body>
+</html>
