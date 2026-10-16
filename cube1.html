@@ -193,15 +193,20 @@
     bottom: (w, h, d) => [w, d, `rotateX(-90deg) translateZ(${h / 2}px)`],
     top:    (w, h, d) => [w, d, `rotateX(90deg) translateZ(${h / 2}px)`]
   };
-  /* how the three hang on the building — size and centre offset in units of
-     cube 1's on-screen size, measured off the placement image */
+  /* Where the three actually hang, in one 3D space. Each box keeps its true
+     size — same pixel pitch across the three, so the edge follows the pixel
+     count — and the camera does the rest: the far ones are not drawn smaller,
+     they are further away. Solved so the projection reproduces the render,
+     which also lands cube 3 dead frontal and swings cube 2 round to 24 deg,
+     exactly as the visual shows. Units are cube 1's edge. */
+  const CAM = 9.69;                                    // camera distance
   const ALL = {
-    "3": { rel:0.551, dx:-2.063, dy:-0.635 },
-    "1": { rel:1.000, dx: 0.000, dy: 0.000 },
-    "2": { rel:0.659, dx:+2.027, dy:-0.485 }
+    "3": { size:288 / 752.5, x:-1.4330, y:-0.4411, z:2.9593 },
+    "1": { size:1,           x: 0,      y: 0,      z:0      },
+    "2": { size:384 / 752.5, x: 1.5696, y:-0.3756, z:2.1865 }
   };
   const ORDER = ["3", "1", "2"];
-  const SPAN = 4.70, RISE = 1.55, LIFT = -0.205;      // group box and its centre offset
+  const SPAN = 4.80, RISE = 1.90;                      // stage, centred on cube 1
   const BLENDS = ["source-over", "screen", "multiply", "overlay", "lighter", "difference"];
 
   /* per-rig state: its own canvases, its own composite buffer */
@@ -232,8 +237,9 @@
     const kf = Math.round(px * .155), pf = Math.round(px * .072), gap = px * .105;
     if (!shared) scene.style.perspective = "1900px";
     scene.style.width = w + "px"; scene.style.height = h + "px";
+    const zoff = shared ? 0 : -d / 2;
     cube.style.cssText = `width:${w}px;height:${h}px;` +
-      `transform:translateZ(${-d / 2}px) rotateX(${V.tilt}deg) rotateY(${V.spin}deg);`;
+      `transform:translateZ(${zoff}px) rotateX(${V.tilt}deg) rotateY(${V.spin}deg);`;
 
     Object.keys(FACE_OF).forEach(key => {
       const [fw, fh, t] = FACE_OF[key](w, h, d);
@@ -270,26 +276,28 @@
       cube.appendChild(face);
     });
     scene.appendChild(cube);
-    return { R, scene, cube, slots, k, w, h, d };
+    return { R, scene, cube, slots, k, w, h, d, zoff };
   }
 
   function render(){
     stage.innerHTML = ""; live = [];
     const all = V.mode === "all";
     if (all){
-      // one perspective over the whole group, so each cube is seen from where it
-      // actually hangs rather than head-on
-      const S1 = V.size * .36, w = SPAN * S1, h = RISE * S1;
-      stage.style.cssText = `position:relative;width:${w}px;height:${h}px;` +
-                            `perspective:${Math.round(S1 * 11)}px;`;
-      const cx = w / 2, cy = h / 2 - LIFT * S1;
+      // one camera over the whole space; the eye sits above cube 1, so cube 1
+      // keeps the base angle and the other two are seen from where they hang
+      const S1 = V.size * .40;
+      stage.style.cssText = `position:relative;width:${SPAN * S1}px;height:${RISE * S1}px;` +
+                            `perspective:${Math.round(CAM * S1)}px;perspective-origin:50% 50%;`;
+      const world = el("", "position:absolute;left:50%;top:50%;width:0;height:0;" +
+                           "transform-style:preserve-3d;");
       ORDER.forEach(id => {
-        const L = ALL[id], g = rig(RIGS[id], S1 * L.rel, true);
-        g.scene.style.position = "absolute";
-        g.scene.style.left = (cx + L.dx * S1 - g.w / 2) + "px";
-        g.scene.style.top  = (cy + L.dy * S1 - g.h / 2) + "px";
-        stage.appendChild(g.scene); live.push(g);
+        const L = ALL[id], g = rig(RIGS[id], S1 * L.size, true);
+        g.scene.style.cssText += `position:absolute;left:${-g.w / 2}px;top:${-g.h / 2}px;` +
+          `transform:translate3d(${L.x * S1}px,${L.y * S1}px,${L.z * S1}px);` +
+          "transform-style:preserve-3d;";
+        world.appendChild(g.scene); live.push(g);
       });
+      stage.appendChild(world);
     } else {
       stage.style.cssText = "";
       const g = rig(CUR(), V.size);
@@ -302,7 +310,7 @@
   }
   const turn = () => live.forEach(g => {
     g.cube.style.transform =
-      `translateZ(${-g.d / 2}px) rotateX(${V.tilt}deg) rotateY(${V.spin}deg)`;
+      `translateZ(${g.zoff}px) rotateX(${V.tilt}deg) rotateY(${V.spin}deg)`;
   });
 
   /* ---------- compositing: every layer into one frame, then onto the panels ---------- */
