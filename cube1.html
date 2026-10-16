@@ -46,8 +46,6 @@
   .tab.on{background:#fff;color:#111}
   .tab:hover{background:rgba(255,255,255,.26)}
   .tab.on:hover{background:#fff}
-  .cap{position:absolute;left:0;right:0;bottom:-30px;text-align:center;font-size:10px;
-       letter-spacing:.14em;color:#80857F;font-weight:600;pointer-events:none}
 
   #set{position:fixed;right:0;top:0;width:306px;height:100%;background:#131514;
        border-left:1px solid #262928;padding:18px 16px 40px;overflow-y:auto;
@@ -175,12 +173,12 @@
         { p:"D", x:64, y:0,   w:128, h:96, s:[  0,   0, 128, 96] },
         { p:"D", x:96, y:96,  w:96,  h:96, s:[  0,  96,  96, 96] },
         { p:"D", x:96, y:192, w:96,  h:96, s:[  0, 192,  96, 96] },
-        { p:"D", x:0,  y:192, w:96,  h:64, s:[  0, 192,  96, 64] },
+        { p:"D", x:0,  y:224, w:96,  h:64, s:[  0, 224,  96, 64] },
         { p:"A", x:0,  y:0,   w:288, h:288, s:[192,   0, 288, 288] },
         { p:"B", x:0,  y:0,   w:128, h:96, s:[480,   0, 128, 96] },
         { p:"B", x:0,  y:96,  w:96,  h:96, s:[480,  96,  96, 96] },
         { p:"B", x:0,  y:192, w:96,  h:96, s:[480, 192,  96, 96] },
-        { p:"B", x:96, y:192, w:96,  h:64, s:[576, 192,  96, 64] },
+        { p:"B", x:96, y:224, w:96,  h:64, s:[576, 224,  96, 64] },
         { p:"F", x:0,  y:0,   w:288, h:192, s:[192, 288, 288, 192] }
       ]
     }
@@ -216,7 +214,7 @@
   const CUR = () => RIGS[V.mode];
 
   /* ---------- build ---------- */
-  function rig(R, px, caption){
+  function rig(R, px){
     const scene = el("scene"), cube = el("cube");
     const k = px / Math.max(R.W, R.H, R.D);
     const w = R.W * k, h = R.H * k, d = R.D * k;
@@ -262,7 +260,6 @@
       cube.appendChild(face);
     });
     scene.appendChild(cube);
-    if (caption){ const c = el("cap"); c.textContent = R.name; scene.appendChild(c); }
     return { R, scene, cube, slots, k, w, h, d };
   }
 
@@ -272,11 +269,11 @@
     if (all){
       stage.style.gap = Math.round(V.size * .30) + "px";
       ORDER.forEach(id => {
-        const R = RIGS[id], g = rig(R, V.size * .52 * R.rel, true);
+        const R = RIGS[id], g = rig(R, V.size * .52 * R.rel);
         stage.appendChild(g.scene); live.push(g);
       });
     } else {
-      const g = rig(CUR(), V.size, false);
+      const g = rig(CUR(), V.size);
       stage.appendChild(g.scene); live.push(g);
     }
     $("bar").style.display = all ? "none" : "flex";
