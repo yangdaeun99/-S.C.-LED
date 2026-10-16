@@ -193,7 +193,15 @@
     bottom: (w, h, d) => [w, d, `rotateX(-90deg) translateZ(${h / 2}px)`],
     top:    (w, h, d) => [w, d, `rotateX(90deg) translateZ(${h / 2}px)`]
   };
-  const ORDER = ["3", "1", "2"];                      // how they hang on the building
+  /* how the three hang on the building — size and centre offset in units of
+     cube 1's on-screen size, measured off the placement image */
+  const ALL = {
+    "3": { rel:0.551, dx:-2.063, dy:-0.635 },
+    "1": { rel:1.000, dx: 0.000, dy: 0.000 },
+    "2": { rel:0.659, dx:+2.027, dy:-0.485 }
+  };
+  const ORDER = ["3", "1", "2"];
+  const SPAN = 4.70, RISE = 1.55, LIFT = -0.205;      // group box and its centre offset
   const BLENDS = ["source-over", "screen", "multiply", "overlay", "lighter", "difference"];
 
   /* per-rig state: its own canvases, its own composite buffer */
@@ -207,20 +215,22 @@
     R.octx = R.off.getContext("2d");
   });
 
-  const V = { mode:"1", tilt:14, spin:-36, size:620 };
+  /* matched to the render: the left face reads 0.212 of the front face across,
+     the bottom 0.111 of it down — atan of those is 12 deg round and 6 deg up */
+  const V = { mode:"1", tilt:6, spin:12, size:620 };
   let sel = -1, live = [], t0 = performance.now();
   const layersOf = R => R.canvases[R.cur].layers;
   const lit = R => layersOf(R).some(L => L.ready && L.visible);
   const CUR = () => RIGS[V.mode];
 
   /* ---------- build ---------- */
-  function rig(R, px){
+  function rig(R, px, shared){
     const scene = el("scene"), cube = el("cube");
     const k = px / Math.max(R.W, R.H, R.D);
     const w = R.W * k, h = R.H * k, d = R.D * k;
     const spec = !lit(R), slots = [];
     const kf = Math.round(px * .155), pf = Math.round(px * .072), gap = px * .105;
-    scene.style.perspective = "1900px";
+    if (!shared) scene.style.perspective = "1900px";
     scene.style.width = w + "px"; scene.style.height = h + "px";
     cube.style.cssText = `width:${w}px;height:${h}px;` +
       `transform:translateZ(${-d / 2}px) rotateX(${V.tilt}deg) rotateY(${V.spin}deg);`;
@@ -267,12 +277,21 @@
     stage.innerHTML = ""; live = [];
     const all = V.mode === "all";
     if (all){
-      stage.style.gap = Math.round(V.size * .30) + "px";
+      // one perspective over the whole group, so each cube is seen from where it
+      // actually hangs rather than head-on
+      const S1 = V.size * .36, w = SPAN * S1, h = RISE * S1;
+      stage.style.cssText = `position:relative;width:${w}px;height:${h}px;` +
+                            `perspective:${Math.round(S1 * 11)}px;`;
+      const cx = w / 2, cy = h / 2 - LIFT * S1;
       ORDER.forEach(id => {
-        const R = RIGS[id], g = rig(R, V.size * .52 * R.rel);
+        const L = ALL[id], g = rig(RIGS[id], S1 * L.rel, true);
+        g.scene.style.position = "absolute";
+        g.scene.style.left = (cx + L.dx * S1 - g.w / 2) + "px";
+        g.scene.style.top  = (cy + L.dy * S1 - g.h / 2) + "px";
         stage.appendChild(g.scene); live.push(g);
       });
     } else {
+      stage.style.cssText = "";
       const g = rig(CUR(), V.size);
       stage.appendChild(g.scene); live.push(g);
     }
