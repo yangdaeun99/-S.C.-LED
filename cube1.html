@@ -206,7 +206,10 @@
     "2": { size:384 / 752.5, x: 1.5696, y:-0.3756, z:2.1865 }
   };
   const ORDER = ["3", "1", "2"];
-  const SPAN = 4.80, RISE = 1.90;                      // stage, centred on cube 1
+  /* the stage is sized symmetrically about cube 1 so the vanishing point lands
+     on it; LIFT then drops the whole stage, camera and all, to sit the group
+     in the middle of the window */
+  const SPAN = 5.00, RISE = 2.00, LIFT = 0.205;
   const BLENDS = ["source-over", "screen", "multiply", "overlay", "lighter", "difference"];
 
   /* per-rig state: its own canvases, its own composite buffer */
@@ -235,11 +238,10 @@
     const w = R.W * k, h = R.H * k, d = R.D * k;
     const spec = !lit(R), slots = [];
     const kf = Math.round(px * .155), pf = Math.round(px * .072), gap = px * .105;
-    if (!shared) scene.style.perspective = "1900px";
+    if (!shared) scene.style.perspective = Math.round(px * 16) + "px";
     scene.style.width = w + "px"; scene.style.height = h + "px";
-    const zoff = shared ? 0 : -d / 2;
     cube.style.cssText = `width:${w}px;height:${h}px;` +
-      `transform:translateZ(${zoff}px) rotateX(${V.tilt}deg) rotateY(${V.spin}deg);`;
+      `transform:rotateX(${V.tilt}deg) rotateY(${V.spin}deg);`;
 
     Object.keys(FACE_OF).forEach(key => {
       const [fw, fh, t] = FACE_OF[key](w, h, d);
@@ -276,7 +278,7 @@
       cube.appendChild(face);
     });
     scene.appendChild(cube);
-    return { R, scene, cube, slots, k, w, h, d, zoff };
+    return { R, scene, cube, slots, k, w, h, d };
   }
 
   function render(){
@@ -285,8 +287,11 @@
     if (all){
       // one camera over the whole space; the eye sits above cube 1, so cube 1
       // keeps the base angle and the other two are seen from where they hang
-      const S1 = V.size * .40;
+      // fit the whole group to the window, then let the wheel zoom from there
+      const fit = Math.min(room.clientWidth * .94 / SPAN, room.clientHeight * .86 / RISE);
+      const S1 = fit * (V.size / 620);
       stage.style.cssText = `position:relative;width:${SPAN * S1}px;height:${RISE * S1}px;` +
+                            `top:${LIFT * S1}px;flex:0 0 auto;` +
                             `perspective:${Math.round(CAM * S1)}px;perspective-origin:50% 50%;`;
       const world = el("", "position:absolute;left:50%;top:50%;width:0;height:0;" +
                            "transform-style:preserve-3d;");
@@ -309,8 +314,7 @@
     tabs(); paint(true);
   }
   const turn = () => live.forEach(g => {
-    g.cube.style.transform =
-      `translateZ(${g.zoff}px) rotateX(${V.tilt}deg) rotateY(${V.spin}deg)`;
+    g.cube.style.transform = `rotateX(${V.tilt}deg) rotateY(${V.spin}deg)`;
   });
 
   /* ---------- compositing: every layer into one frame, then onto the panels ---------- */
@@ -559,6 +563,7 @@
     turn();
   });
   room.addEventListener("pointerup", () => { drag = null; });
+  let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(render, 120); });
   room.addEventListener("wheel", e => {
     e.preventDefault();
     V.size = clamp(V.size - e.deltaY * .6, 220, 1200);
